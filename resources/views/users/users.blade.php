@@ -16,6 +16,7 @@
     </li>
 @endforeach
 </ul>
-{!! $users->render() !!}  // 追加
+ 
+{!! $users->render() !!}
 
 @endif
