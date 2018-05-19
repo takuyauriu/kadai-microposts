@@ -19,6 +19,9 @@ class MicropostsController extends Controller
      */
     public function index()
     {
+        
+        
+        
         $data = [];
         if (\Auth::check()) {
             $user = \Auth::user();
@@ -58,5 +61,7 @@ class MicropostsController extends Controller
 
         return redirect()->back();
     }
+    
+    
 
 }

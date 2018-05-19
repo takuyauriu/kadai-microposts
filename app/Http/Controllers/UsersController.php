@@ -11,6 +11,9 @@ class UsersController extends Controller
 {
     public function index()
     {
+        
+        
+         
         $users = User::paginate(10);
 
         return view('users.index', [
@@ -36,7 +39,7 @@ class UsersController extends Controller
         return view('users.show', $data);
     }
     
-     // 追加
+    
     public function followings($id)
     {
         $user = User::find($id);
@@ -66,4 +69,6 @@ class UsersController extends Controller
 
         return view('users.followers', $data);
     }
+    
+    
 }    
