@@ -1,0 +1,815 @@
+user_favorite table変更前
+
+
+<?php
+
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Database\Migrations\Migration;
+
+class CreateUserFavoriteTable extends Migration
+{
+    /**
+     * Run the migrations.
+     *
+     * @return void
+     */
+    public function up()
+    {
+        Schema::create('user_favorite', function (Blueprint $table) {
+            $table->increments('id');
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     *
+     * @return void
+     */
+    public function down()
+    {
+        Schema::dropIfExists('user_favorite');
+    }
+}
+
+
+
+
+app/User.php変更前
+<?php
+
+namespace App;
+
+use Illuminate\Notifications\Notifiable;
+use Illuminate\Foundation\Auth\User as Authenticatable;
+
+class User extends Authenticatable
+{
+    use Notifiable;
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array
+     */
+    protected $fillable = [
+        'name', 'email', 'password',
+    ];
+
+    /**
+     * The attributes that should be hidden for arrays.
+     *
+     * @var array
+     */
+    protected $hidden = [
+        'password', 'remember_token',
+    ];
+    
+    public function microposts()
+    {
+        return $this->hasMany(Micropost::class);
+    }
+    
+    
+    public function followings()
+    {
+        return $this->belongsToMany(User::class, 'user_follow', 'user_id', 'follow_id')->withTimestamps();
+    }
+
+    public function followers()
+    {
+        return $this->belongsToMany(User::class, 'user_follow', 'follow_id', 'user_id')->withTimestamps();
+    }
+    
+    public function follow($userId)
+{
+    // 既にフォローしているかの確認
+    $exist = $this->is_following($userId);
+    // 自分自身ではないかの確認
+    $its_me = $this->id == $userId;
+
+    if ($exist || $its_me) {
+        // 既にフォローしていれば何もしない
+        return false;
+    } else {
+        // 未フォローであればフォローする
+        $this->followings()->attach($userId);
+        return true;
+    }
+}
+
+public function unfollow($userId)
+{
+    // 既にフォローしているかの確認
+    $exist = $this->is_following($userId);
+    // 自分自身ではないかの確認
+    $its_me = $this->id == $userId;
+
+    if ($exist && !$its_me) {
+        // 既にフォローしていればフォローを外す
+        $this->followings()->detach($userId);
+        return true;
+    } else {
+        // 未フォローであれば何もしない
+        return false;
+    }
+}
+
+public function is_following($userId) {
+    return $this->followings()->where('follow_id', $userId)->exists();
+}
+
+
+public function feed_microposts()
+    {
+        $follow_user_ids = $this->followings()-> pluck('users.id')->toArray();
+        $follow_user_ids[] = $this->id;
+        return Micropost::whereIn('user_id', $follow_user_ids);
+    }
+    
+    
+    
+    
+}
+
+
+
+web.php変更前
+<?php
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|
+*/
+
+Route::get('/', 'MicropostsController@index');
+
+
+
+// ユーザ登録
+Route::get('signup', 'Auth\RegisterController@showRegistrationForm')->name('signup.get');
+Route::post('signup', 'Auth\RegisterController@register')->name('signup.post');
+
+// ログイン認証
+Route::get('login', 'Auth\LoginController@showLoginForm')->name('login');
+Route::post('login', 'Auth\LoginController@login')->name('login.post');
+Route::get('logout', 'Auth\LoginController@logout')->name('logout.get');
+
+// ログイン認証確認
+Route::group(['middleware' => ['auth']], function () {
+    Route::resource('users', 'UsersController', ['only' => ['index', 'show']]);
+    Route::group(['prefix' => 'users/{id}'], function () {
+        Route::post('follow', 'UserFollowController@store')->name('user.follow');
+        Route::delete('unfollow', 'UserFollowController@destroy')->name('user.unfollow');
+        Route::get('followings', 'UsersController@followings')->name('users.followings');
+        Route::get('followers', 'UsersController@followers')->name('users.followers');
+    });
+    
+    Route::resource('microposts', 'MicropostsController', ['only' => ['store', 'destroy']]);
+});
+
+
+Controller.php変更前
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Foundation\Bus\DispatchesJobs;
+use Illuminate\Routing\Controller as BaseController;
+use Illuminate\Foundation\Validation\ValidatesRequests;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
+abstract class Controller extends BaseController
+{
+    use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
+    
+    // 追加
+    public function counts($user) {
+        $count_microposts = $user->microposts()->count();
+        $count_followings = $user->followings()->count();
+        $count_followers = $user->followers()->count();
+
+        return [
+            'count_microposts' => $count_microposts,
+            'count_followings' => $count_followings,
+            'count_followers' => $count_followers,
+        ];
+    }
+}
+
+
+users/show.blade.php変更前
+@extends('layouts.app')
+
+@section('content')
+    <div class="row">
+        <aside class="col-xs-4">
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <h3 class="panel-title">{{ $user->name }}</h3>
+                </div>
+                <div class="panel-body">
+                <img class="media-object img-rounded img-responsive" src="{{ Gravatar::src($user->email, 500) }}" alt="">
+                </div>
+            </div>
+            @include('user_follow.follow_button', ['user' => $user])
+            
+        </aside>
+        <div class="col-xs-8">
+            <ul class="nav nav-tabs nav-justified">
+                <li role="presentation" class="{{ Request::is('users/' . $user->id) ? 'active' : '' }}"><a href="{{ route('users.show', ['id' => $user->id]) }}">TimeLine <span class="badge">{{ $count_microposts }}</span></a></li>
+                <li role="presentation" class="{{ Request::is('users/*/followings') ? 'active' : '' }}"><a href="{{ route('users.followings', ['id' => $user->id]) }}">Followings <span class="badge">{{ $count_followings }}</span></a></li>
+                <li role="presentation" class="{{ Request::is('users/*/followers') ? 'active' : '' }}"><a href="{{ route('users.followers', ['id' => $user->id]) }}">Followers <span class="badge">{{ $count_followers }}</span></a></li>
+                
+            </ul>
+            @if (Auth::user()->id == $user->id)
+                  {!! Form::open(['route' => 'microposts.store']) !!}
+                      <div class="form-group">
+                          {!! Form::textarea('content', old('content'), ['class' => 'form-control', 'rows' => '2']) !!}
+                          {!! Form::submit('Post', ['class' => 'btn btn-primary btn-block']) !!}
+                      </div>
+                  {!! Form::close() !!}
+            @endif
+            @if (count($microposts) > 0)
+                @include('microposts.microposts', ['microposts' => $microposts])
+            @endif  
+        </div>
+    </div>
+@endsection
+
+
+UsersController変更前
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+use App\User; // 追加
+use App\Micropost; // 追加
+
+class UsersController extends Controller
+{
+    public function index()
+    {
+        
+        
+         
+        $users = User::paginate(10);
+
+        return view('users.index', [
+            'users' => $users,
+        ]);
+        
+        
+        
+    }
+    
+    public function show($id)
+    {
+       $user = User::find($id);
+        $microposts = $user->microposts()->orderBy('created_at', 'desc')->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'microposts' => $microposts,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.show', $data);
+    }
+    
+    
+    public function followings($id)
+    {
+        $user = User::find($id);
+        $followings = $user->followings()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $followings,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.followings', $data);
+    }
+
+    public function followers($id)
+    {
+        $user = User::find($id);
+        $followers = $user->followers()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $followers,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.followers', $data);
+    }
+    
+    
+}    
+
+
+routes/web.php変更前
+<?php
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|
+*/
+
+Route::get('/', 'MicropostsController@index');
+
+
+
+// ユーザ登録
+Route::get('signup', 'Auth\RegisterController@showRegistrationForm')->name('signup.get');
+Route::post('signup', 'Auth\RegisterController@register')->name('signup.post');
+
+// ログイン認証
+Route::get('login', 'Auth\LoginController@showLoginForm')->name('login');
+Route::post('login', 'Auth\LoginController@login')->name('login.post');
+Route::get('logout', 'Auth\LoginController@logout')->name('logout.get');
+
+// ログイン認証確認
+Route::group(['middleware' => ['auth']], function () {
+    Route::resource('users', 'UsersController', ['only' => ['index', 'show']]);
+    Route::group(['prefix' => 'users/{id}'], function () {
+        Route::post('follow', 'UserFollowController@store')->name('user.follow');
+        Route::delete('unfollow', 'UserFollowController@destroy')->name('user.unfollow');
+        Route::get('followings', 'UsersController@followings')->name('users.followings');
+        Route::get('followers', 'UsersController@followers')->name('users.followers');
+        
+        Route::post('favorite', 'UserFavoriteController@store')->name('user.favorite');
+        Route::delete('unfavorite', 'UserFavoriteController@destroy')->name('user.unfavorite');
+        Route::get('myfavorites', 'UsersController@myfavorites')->name('users.myfavorites');
+        Route::get('favoritemes', 'UsersController@favoritemes')->name('users.favoritemes');
+        
+    
+    });
+    
+    Route::resource('microposts', 'MicropostsController', ['only' => ['store', 'destroy']]);
+});
+
+
+------0528-------
+UserFavoriteController変更前
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+class UserFavoriteController extends Controller
+{
+    public function store(Request $request, $id)
+    {
+        \Auth::user()->favorite($id);
+        return redirect()->back();
+    }
+
+    public function destroy($id)
+    {
+        \Auth::user()->unfavorite($id);
+        return redirect()->back();
+    }
+}
+
+
+---0529---
+@if (Auth::user()->id != $user->id)
+    @if (Auth::user()->is_myfavorite($user->id))
+        {!! Form::open(['route' => ['user.unfavorite', $user->id], 'method' => 'delete']) !!}
+            {!! Form::submit('Unfavorite', ['class' => "btn btn-danger btn-block"]) !!}
+        {!! Form::close() !!}
+    @else
+        {!! Form::open(['route' => ['user.favorite', $user->id]]) !!}
+            {!! Form::submit('Favorite', ['class' => "btn btn-primary btn-block"]) !!}
+        {!! Form::close() !!}
+    @endif
+@endif
+
+
+roll部変更前
+<li role="presentation" class="{{ Request::is('users/*/myfavorites') ? 'active' : '' }}"><a href="{{ route('users.myfavorites', ['id' => $user->id]) }}">MyFavorite <span class="badge">{{ $count_myfavorites }}</span></a></li>
+
+タイムライン表示を編集してfavoriteに使えるように編集
+<li role="presentation" class="{{ Request::is('users/' . $user->id) ? 'active' : '' }}"><a href="{{ route('users.show', ['id' => $user->id]) }}">MyFavorite <span class="badge">{{ $count_microposts }}</span></a></li>
+
+
+
+UsersController変更前
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+use App\User; // 追加
+use App\Micropost; // 追加
+
+class UsersController extends Controller
+{
+    public function index()
+    {
+        
+        
+         
+        $users = User::paginate(10);
+
+        return view('users.index', [
+            'users' => $users,
+        ]);
+        
+        
+        
+    }
+    
+    public function show($id)
+    {
+       $user = User::find($id);
+        $microposts = $user->microposts()->orderBy('created_at', 'desc')->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'microposts' => $microposts,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.show', $data);
+    }
+    
+    
+    public function followings($id)
+    {
+        $user = User::find($id);
+        $followings = $user->followings()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $followings,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.followings', $data);
+    }
+
+    public function followers($id)
+    {
+        $user = User::find($id);
+        $followers = $user->followers()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $followers,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.followers', $data);
+    }
+  
+  
+    
+ public function myfavorites($id)
+    {
+        $user = User::find($id);
+        $myfavorites = $user->myfavorites()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $myfavorites,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.show', $data);
+    }
+    
+}    
+
+
+---0530---
+route変更前
+<?php
+
+/*
+|--------------------------------------------------------------------------
+| Web Routes
+|--------------------------------------------------------------------------
+|
+| Here is where you can register web routes for your application. These
+| routes are loaded by the RouteServiceProvider within a group which
+| contains the "web" middleware group. Now create something great!
+|
+*/
+
+Route::get('/', 'MicropostsController@index');
+
+
+
+// ユーザ登録
+Route::get('signup', 'Auth\RegisterController@showRegistrationForm')->name('signup.get');
+Route::post('signup', 'Auth\RegisterController@register')->name('signup.post');
+
+// ログイン認証
+Route::get('login', 'Auth\LoginController@showLoginForm')->name('login');
+Route::post('login', 'Auth\LoginController@login')->name('login.post');
+Route::get('logout', 'Auth\LoginController@logout')->name('logout.get');
+
+// ログイン認証確認
+Route::group(['middleware' => ['auth']], function () {
+    Route::resource('users', 'UsersController', ['only' => ['index', 'show']]);
+    Route::group(['prefix' => 'users/{id}'], function () {
+        Route::post('follow', 'UserFollowController@store')->name('user.follow');
+        Route::delete('unfollow', 'UserFollowController@destroy')->name('user.unfollow');
+        Route::get('followings', 'UsersController@followings')->name('users.followings');
+        Route::get('followers', 'UsersController@followers')->name('users.followers');
+        
+        
+        //favorite3行追加
+        Route::post('favorite', 'UserFavoriteController@store')->name('user.favorite');
+        Route::delete('unfavorite', 'UserFavoriteController@destroy')->name('user.unfavorite');
+        Route::get('myfavorites', 'UsersController@followings')->name('users.myfavorites');
+    });
+    
+    Route::resource('microposts', 'MicropostsController', ['only' => ['store', 'destroy']]);
+});
+
+
+user.php変更前
+public function feed_microposts()
+    {
+        $follow_user_ids = $this->followings()-> pluck('users.id')->toArray();
+        $follow_user_ids[] = $this->id;
+        return Micropost::whereIn('user_id', $follow_user_ids);
+        
+        $favorite_user_ids = $this->myfavorites()-> pluck('users.id')->toArray();
+        $favorite_user_ids[] = $this->id;
+        return Micropost::whereIn('user_id', $favorite_user_ids);
+    }
+    
+    
+// favorite追加
+public function myfavorites()
+    {
+        return $this->belongsToMany(User::class, 'user_favorite', 'user_id', 'favorite_id')->withTimestamps();
+    }
+    
+
+
+public function favorite($userId)
+{
+    // 既にfavoriteしているかの確認
+    $exist = $this->is_myfavorite($userId);
+    // 自分自身ではないかの確認
+    $its_me = $this->id == $userId;
+
+    if ($exist || $its_me) {
+        // 既にfavoriteしていれば何もしない
+        return false;
+    } else {
+        // 未favoriteであればfavoriteする
+        $this->myfavorites()->attach($userId);
+        return true;
+    }
+}  
+
+
+public function unfavorite($userId)
+{
+    // 既にフォローしているかの確認
+    $exist = $this->is_myfavorite($userId);
+    // 自分自身ではないかの確認
+    $its_me = $this->id == $userId;
+
+    if ($exist && !$its_me) {
+        // 既にフォローしていればフォローを外す
+        $this->myfavorites()->detach($userId);
+        return true;
+    } else {
+        // 未フォローであれば何もしない
+        return false;
+    }
+}
+
+
+public function is_myfavorite($userId) {
+    return $this->myfavorites()->where('favorite_id', $userId)->exists();
+}
+}
+
+
+Controller変更前
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Foundation\Bus\DispatchesJobs;
+use Illuminate\Routing\Controller as BaseController;
+use Illuminate\Foundation\Validation\ValidatesRequests;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+
+abstract class Controller extends BaseController
+{
+    use AuthorizesRequests, DispatchesJobs, ValidatesRequests;
+    
+    // 追加
+    public function counts($user) {
+        $count_microposts = $user->microposts()->count();
+        $count_followings = $user->followings()->count();
+        $count_followers = $user->followers()->count();
+        
+        $count_myfavorites = $user->myfavorites()->count();
+
+        return [
+            'count_microposts' => $count_microposts,
+            'count_followings' => $count_followings,
+            'count_followers' => $count_followers,
+            
+            'count_myfavorites' => $count_myfavorites,
+        ];
+    }
+}
+
+
+favorite_button変更前
+@if (Auth::user()->id != $user->id)
+    @if (Auth::user()->is_myfavorite($user->id))
+        {!! Form::open(['route' => ['user.unfavorite', $user->id], 'method' => 'delete']) !!}
+            {!! Form::submit('Unfavorite', ['class' => "btn btn-default btn-xs"]) !!}
+        {!! Form::close() !!}
+    @else
+        {!! Form::open(['route' => ['user.favorite', $user->id]]) !!}
+            {!! Form::submit('Favorite', ['class' => "btn btn-success btn-xs"]) !!}
+        {!! Form::close() !!}
+    @endif
+@endif
+
+
+UsersController.php変更前
+ public function myfavorites($id)
+    {
+        $user = User::find($id);
+        $myfavorites = $user->myfavorites()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $myfavorites,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.show', $data);
+    }
+    
+    
+----0531----
+user_favoriteController.php変更前
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+
+class UserFavoriteController extends Controller
+{
+    public function store(Request $request, $id)
+    {
+        \Auth::user()->favorite($id);
+        return redirect()->back();
+    }
+
+    public function destroy($id)
+    {
+        \Auth::user()->unfavorite($id);
+        return redirect()->back();
+        
+    }
+}
+
+UsersController.php変更前
+ public function myfavorites($id)
+    {
+        $user = User::find($id);
+        $myfavorites = $user->myfavorites()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $myfavorites,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.show', $data);
+    }
+    
+    
+
+----0531お気に入り実装後----
+UsersController myfavorites変更前
+ public function myfavorites($id)
+    {
+        $user = User::find($id);
+        $myfavorites = $user->myfavorites()->paginate(10);
+
+        $data = [
+            'user' => $user,
+            'users' => $myfavorites,
+        ];
+
+        $data += $this->counts($user);
+
+        return view('users.show', $data);
+    }
+}
+
+favoriteタブ部分のみ抽出
+<li role="presentation" class="{{ Request::is('users/*/myfavorites') ? 'active' : '' }}"><a href="{{ route('users.myfavorites', ['id' => $user->id]) }}">MyFavorite <span class="badge">{{ $count_myfavorites }}</span></a></li>
+
+
+
+myfavorites.blade.php変更前
+@extends('layouts.app')
+
+@section('content')
+    <div class="row">
+        <aside class="col-xs-4">
+            <div class="panel panel-default">
+                <div class="panel-heading">
+                    <h3 class="panel-title">{{ $user->name }}</h3>
+                </div>
+                <div class="panel-body">
+                    <img class="media-object img-rounded img-responsive" src="{{ Gravatar::src($user->email, 500) }}" alt="">
+                </div>
+            </div>
+            @include('user_favorite.favorite_button', ['user' => $user])
+        </aside>
+        <div class="col-xs-8">
+            <ul class="nav nav-tabs nav-justified">
+                <li role="presentation" class="{{ Request::is('users/' . $user->id) ? 'active' : '' }}"><a href="{{ route('users.show', ['id' => $user->id]) }}">TimeLine <span class="badge">{{ $count_microposts }}</span></a></li>
+                <li role="presentation" class="{{ Request::is('users/*/followings') ? 'active' : '' }}"><a href="{{ route('users.followings', ['id' => $user->id]) }}">Followings <span class="badge">{{ $count_followings }}</span></a></li>
+                <li role="presentation" class="{{ Request::is('users/*/followers') ? 'active' : '' }}"><a href="{{ route('users.followers', ['id' => $user->id]) }}">Followers <span class="badge">{{ $count_followers }}</span></a></li>
+                <li role="presentation" class="{{ Request::is('users/*/myfavorites') ? 'active' : '' }}"><a href="{{ route('users.myfavorites', ['id' => $user->id]) }}">MyFavorite <span class="badge">{{ $count_myfavorites }}</span></a></li>
+            </ul>
+            @include('microposts.microposts', ['microposts' => $microposts])
+        </div>
+    </div>
+@endsection
+
+
+ public function myfavorites($id)
+    {
+       $data = [];
+        if (\Auth::check()) {
+            $user = \Auth::user();
+            $microposts = $user->myfavorites()->orderBy('created_at', 'desc')->paginate(10);
+
+            $data = [
+                'user' => $user,
+                'microposts' => $microposts,
+            ];
+            
+        }
+        return view('users.myfavorites', $data);
+            
+    }
+    
+    public function myfavorites($id)
+    {
+       $data = [];
+        if (\Auth::check()) {
+            $user = \Auth::user();
+            $microposts = $user->myfavorites()->orderBy('created_at', 'desc')->paginate(10);
+
+            $data = [
+                'user' => $user,
+                'microposts' => $microposts,
+            ];
+            
+       $data += $this->counts($user);
+            return view('users.show', $data);
+        }else {
+            return view('welcome');
+        }
+    }    

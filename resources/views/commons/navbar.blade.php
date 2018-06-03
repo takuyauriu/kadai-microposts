@@ -21,6 +21,7 @@
                                 
                                 <li role="separator" class="divider"></li>
                                 <li>{!! link_to_route('users.show', 'My profile', ['id' => Auth::user()->id]) !!}</li>
+                                <li>{!! link_to_route('users.myfavorites', 'My favorite', ['id' => Auth::user()->id]) !!}</li>
                                 <li>{!! link_to_route('logout.get', 'Logout') !!}</li>
                             </ul>
                         </li>

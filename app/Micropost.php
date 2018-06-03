@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Micropost extends Model
 {
     // 追加
-    protected $fillable = ['content', 'user_id'];
+    protected $fillable = ['content', 'user_id','favorite_id'];
 
     public function user()
     {
